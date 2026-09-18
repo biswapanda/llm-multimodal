@@ -6,10 +6,22 @@
 use std::collections::HashMap;
 
 use image::DynamicImage;
+use serde_json::Value;
 
 use super::{preprocessor_config::PreProcessorConfig, transforms::TransformError};
 pub use crate::encoder_inputs::{ModelSpecificValue, PreprocessedEncoderInputs};
 use crate::types::RgbFrameRef;
+
+/// Request-specific inputs that can affect vision preprocessing.
+#[derive(Debug, Clone, Default)]
+pub struct VisionPreprocessingContext {
+    /// Loaded Hugging Face `config.json` for the active model.
+    pub model_config: Value,
+    /// Effective runtime context length reported by the inference engine.
+    pub max_model_len: Option<usize>,
+    /// Tokenized prompt length after removing this modality's placeholders.
+    pub text_prompt_length: usize,
+}
 
 /// Helper to extract a dimension from encoder_input given an ndim-dependent axis index.
 /// Returns `Err` if the ndim is not 4 or 5.
@@ -88,6 +100,19 @@ pub trait VisionPreProcessor: Send + Sync {
         images: &[DynamicImage],
         config: &PreProcessorConfig,
     ) -> Result<PreprocessedEncoderInputs, TransformError>;
+
+    /// Preprocess a batch with request and model context.
+    ///
+    /// Most processors are independent of the text prompt and model config,
+    /// so the default preserves the existing preprocessing path.
+    fn preprocess_with_context(
+        &self,
+        images: &[DynamicImage],
+        config: &PreProcessorConfig,
+        _context: &VisionPreprocessingContext,
+    ) -> Result<PreprocessedEncoderInputs, TransformError> {
+        self.preprocess(images, config)
+    }
 
     /// Preprocess one decoded video clip represented as sampled frames.
     ///
@@ -375,6 +400,12 @@ impl VisionProcessorRegistry {
         registry.register(
             "minimax_m3_vl",
             Box::new(super::processors::MiniMaxM3Processor::new()),
+        );
+
+        // Nemotron-H Omni dynamic-resolution RADIO vision encoder.
+        registry.register(
+            "nemotron_h_omni",
+            Box::new(super::processors::NemotronHOmniProcessor::new()),
         );
 
         registry
